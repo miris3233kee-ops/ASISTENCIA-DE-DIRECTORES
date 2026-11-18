@@ -83,22 +83,23 @@
         /* Botones de cámara */
         .botones-camara {
             display: flex;
-            gap: 10px;
-            margin-bottom: 14px;
+            gap: 8px;
+            margin-bottom: 12px;
+            flex-wrap: wrap;
         }
 
         button {
             border: none;
             border-radius: 12px;
-            padding: 14px 16px;
-            font-size: 0.95rem;
+            padding: 13px 14px;
+            font-size: 0.92rem;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
         }
 
         button:active {
@@ -106,12 +107,13 @@
         }
 
         button:disabled {
-            opacity: 0.6;
+            opacity: 0.55;
             cursor: not-allowed;
         }
 
         #botonCamara {
             flex: 1;
+            min-width: 140px;
             background: var(--primary);
             color: white;
         }
@@ -120,29 +122,82 @@
             background: var(--primary-dark);
         }
 
-        #botonDetener {
+        .btn-secundario {
             background: #eceff1;
-            color: #455a64;
-            width: 52px;
+            color: #37474f;
+            width: 48px;
+            padding: 13px 0;
             display: none;
         }
 
-        #botonDetener.visible {
+        .btn-secundario.visible {
             display: flex;
         }
 
-        /* Lector QR */
-        #reader {
-            width: 100%;
-            border-radius: 14px;
+        .btn-secundario.activo {
+            background: #ffecb3;
+            color: #f57f17;
+        }
+
+        /* Contenedor del lector */
+        .lector-wrapper {
+            position: relative;
+            border-radius: 16px;
             overflow: hidden;
             margin-bottom: 14px;
-            background: #000;
+            background: #111;
             min-height: 0;
         }
 
+        #reader {
+            width: 100%;
+        }
+
         #reader video {
-            border-radius: 14px !important;
+            border-radius: 16px !important;
+            display: block;
+        }
+
+        /* Indicador de escaneo */
+        .scan-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+        }
+
+        .scan-overlay.visible {
+            display: block;
+        }
+
+        .scan-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 70%;
+            max-width: 260px;
+            aspect-ratio: 1;
+            border: 3px solid rgba(255,255,255,0.85);
+            border-radius: 16px;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.35);
+        }
+
+        .scan-line {
+            position: absolute;
+            left: 8%;
+            right: 8%;
+            height: 3px;
+            background: linear-gradient(90deg, transparent, #4caf50, transparent);
+            border-radius: 2px;
+            animation: scanMove 2.2s ease-in-out infinite;
+        }
+
+        @keyframes scanMove {
+            0%   { top: 12%; opacity: 0.4; }
+            50%  { top: 85%; opacity: 1; }
+            100% { top: 12%; opacity: 0.4; }
         }
 
         /* Resultado */
@@ -328,7 +383,6 @@
             font-size: 0.9rem;
         }
 
-        /* Footer */
         .footer {
             text-align: center;
             padding: 10px;
@@ -341,7 +395,6 @@
 
 <div class="contenedor">
 
-    <!-- HEADER -->
     <div class="header">
         <div class="contador" id="contadorHoy">Hoy: 0</div>
         <h1>📱 LECTOR QR</h1>
@@ -350,18 +403,31 @@
 
     <div class="body">
 
-        <!-- BOTONES CÁMARA -->
+        <!-- BOTONES CÁMARA MEJORADOS -->
         <div class="botones-camara">
             <button id="botonCamara" onclick="iniciarCamara()">
                 📷 ACTIVAR CÁMARA
             </button>
-            <button id="botonDetener" onclick="detenerCamara()" title="Detener cámara">
+            <button id="botonDetener" class="btn-secundario" onclick="detenerCamara()" title="Detener cámara">
                 ⏹️
+            </button>
+            <button id="botonCambiar" class="btn-secundario" onclick="cambiarCamara()" title="Cambiar cámara">
+                🔄
+            </button>
+            <button id="botonLinterna" class="btn-secundario" onclick="toggleLinterna()" title="Linterna">
+                🔦
             </button>
         </div>
 
-        <!-- LECTOR -->
-        <div id="reader"></div>
+        <!-- LECTOR CON OVERLAY -->
+        <div class="lector-wrapper">
+            <div id="reader"></div>
+            <div class="scan-overlay" id="scanOverlay">
+                <div class="scan-frame">
+                    <div class="scan-line"></div>
+                </div>
+            </div>
+        </div>
 
         <!-- RESULTADO -->
         <div id="resultado" class="aviso">
@@ -402,9 +468,8 @@
 // ============================================================
 const URL_APPS_SCRIPT = "https://script.google.com/macros/s/AKfycbyX1EK2U9WpxPHuDYZigJXWgSo31V2txxVl5Xd3t6XqC6J3W0xuxWugo8MHF0Dly_JaKw/exec";
 
-// Retención de historial: 90 días (3 meses)
 const DIAS_RETENCION = 90;
-const MAX_REGISTROS = 800; // Límite de seguridad
+const MAX_REGISTROS = 800;
 
 let lector = null;
 let procesando = false;
@@ -412,39 +477,33 @@ let camaraActiva = false;
 let historial = [];
 let contadorHoy = 0;
 
+// Variables de cámara mejoradas
+let camarasDisponibles = [];
+let indiceCamaraActual = 0;
+let linternaEncendida = false;
+let videoTrack = null;
+
 // ============================================================
-// INICIALIZACIÓN - Cargar y limpiar datos antiguos
+// INICIALIZACIÓN
 // ============================================================
 function inicializarDatos() {
     try {
-        // Cargar historial
         const guardado = localStorage.getItem('historialAsistencia');
-        if (guardado) {
-            historial = JSON.parse(guardado);
-        }
+        if (guardado) historial = JSON.parse(guardado);
 
-        // Limpiar registros más antiguos de 90 días
         const limiteMs = DIAS_RETENCION * 24 * 60 * 60 * 1000;
         const ahora = Date.now();
         const antes = historial.length;
 
-        historial = historial.filter(item => {
-            return item.ts && (ahora - item.ts) < limiteMs;
-        });
+        historial = historial.filter(item => item.ts && (ahora - item.ts) < limiteMs);
+        if (historial.length > MAX_REGISTROS) historial = historial.slice(0, MAX_REGISTROS);
 
-        // Limitar cantidad máxima por seguridad
-        if (historial.length > MAX_REGISTROS) {
-            historial = historial.slice(0, MAX_REGISTROS);
-        }
-
-        // Guardar si se eliminó algo
         if (historial.length !== antes) {
             localStorage.setItem('historialAsistencia', JSON.stringify(historial));
         }
 
         actualizarHistorialUI();
 
-        // Contador del día
         const cont = localStorage.getItem('contadorHoy');
         const fecha = localStorage.getItem('fechaContador');
         const hoy = new Date().toDateString();
@@ -458,53 +517,88 @@ function inicializarDatos() {
         }
 
         document.getElementById('contadorHoy').textContent = `Hoy: ${contadorHoy}`;
-
-        // Mostrar info de retención
-        const total = historial.length;
-        document.getElementById('infoRetencion').textContent = 
-            total > 0 ? `${total} registros · 90 días` : 'Guarda 3 meses';
+        document.getElementById('infoRetencion').textContent =
+            historial.length > 0 ? `${historial.length} registros · 90 días` : 'Guarda 3 meses';
 
     } catch (e) {
-        console.error('Error al cargar datos:', e);
+        console.error(e);
         historial = [];
     }
 }
 
-// Ejecutar al cargar
 inicializarDatos();
 
 // ============================================================
-// CÁMARA
+// CÁMARA MEJORADA
 // ============================================================
+async function obtenerCamaras() {
+    try {
+        const devices = await Html5Qrcode.getCameras();
+        if (devices && devices.length) {
+            // Preferir cámara trasera (environment)
+            camarasDisponibles = devices;
+            // Buscar la trasera primero
+            const trasera = devices.findIndex(d =>
+                /back|rear|environment|trasera|posterior/i.test(d.label)
+            );
+            indiceCamaraActual = trasera >= 0 ? trasera : 0;
+            return true;
+        }
+    } catch (e) {
+        console.warn('No se pudieron listar cámaras:', e);
+    }
+    return false;
+}
+
 async function iniciarCamara() {
     const boton = document.getElementById("botonCamara");
-    const botonDetener = document.getElementById("botonDetener");
-
     boton.disabled = true;
     boton.innerHTML = "⏳ ACTIVANDO...";
 
     try {
+        // Pedir permiso primero
         const stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: { ideal: "environment" } }
         });
         stream.getTracks().forEach(t => t.stop());
 
+        // Obtener lista de cámaras
+        await obtenerCamaras();
+
         lector = new Html5Qrcode("reader");
 
-        await lector.start(
-            { facingMode: "environment" },
-            {
-                fps: 12,
-                qrbox: { width: 240, height: 240 },
-                aspectRatio: 1.0
+        const config = {
+            fps: 15,
+            qrbox: function(viewfinderWidth, viewfinderHeight) {
+                // Área de escaneo adaptativa (70% del menor lado)
+                const minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+                const size = Math.floor(minEdge * 0.72);
+                return { width: size, height: size };
             },
-            (codigo) => procesarQR(codigo),
-            () => {}
-        );
+            aspectRatio: 1.0,
+            disableFlip: false
+        };
+
+        // Iniciar con cámara específica si hay lista, sino con facingMode
+        if (camarasDisponibles.length > 0) {
+            const camId = camarasDisponibles[indiceCamaraActual].id;
+            await lector.start(camId, config, onScanSuccess, onScanFailure);
+        } else {
+            await lector.start(
+                { facingMode: "environment" },
+                config,
+                onScanSuccess,
+                onScanFailure
+            );
+        }
 
         camaraActiva = true;
         boton.innerHTML = "🟢 CÁMARA ACTIVA";
-        botonDetener.classList.add("visible");
+        mostrarBotonesSecundarios(true);
+        document.getElementById("scanOverlay").classList.add("visible");
+
+        // Guardar referencia del track para la linterna
+        setTimeout(capturarVideoTrack, 600);
 
         mostrarMensaje("AVISO", "ESCANEE EL CÓDIGO QR", "", "");
 
@@ -512,12 +606,46 @@ async function iniciarCamara() {
         console.error(err);
         boton.disabled = false;
         boton.innerHTML = "📷 ACTIVAR CÁMARA";
-        mostrarMensaje("ERROR", "NO SE PUDO ACTIVAR LA CÁMARA", "", "");
-        hablar("No se pudo activar la cámara");
+        mostrarBotonesSecundarios(false);
+
+        let mensaje = "NO SE PUDO ACTIVAR LA CÁMARA";
+        if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+            mensaje = "PERMISO DE CÁMARA DENEGADO";
+        } else if (err.name === "NotFoundError") {
+            mensaje = "NO SE ENCONTRÓ CÁMARA";
+        } else if (err.name === "NotReadableError") {
+            mensaje = "CÁMARA EN USO POR OTRA APP";
+        }
+
+        mostrarMensaje("ERROR", mensaje, "", "");
+        hablar(mensaje.toLowerCase());
     }
 }
 
+function onScanSuccess(codigo) {
+    procesarQR(codigo);
+}
+
+function onScanFailure() {
+    // Silenciar errores normales de lectura continua
+}
+
+function capturarVideoTrack() {
+    try {
+        const video = document.querySelector("#reader video");
+        if (video && video.srcObject) {
+            const tracks = video.srcObject.getVideoTracks();
+            if (tracks.length) {
+                videoTrack = tracks[0];
+            }
+        }
+    } catch (e) {}
+}
+
 async function detenerCamara() {
+    linternaEncendida = false;
+    actualizarBotonLinterna();
+
     if (lector && camaraActiva) {
         try {
             await lector.stop();
@@ -525,14 +653,109 @@ async function detenerCamara() {
         } catch (e) {}
         camaraActiva = false;
         lector = null;
+        videoTrack = null;
     }
 
     document.getElementById("botonCamara").disabled = false;
     document.getElementById("botonCamara").innerHTML = "📷 ACTIVAR CÁMARA";
-    document.getElementById("botonDetener").classList.remove("visible");
+    mostrarBotonesSecundarios(false);
+    document.getElementById("scanOverlay").classList.remove("visible");
     document.getElementById("reader").innerHTML = "";
 
     mostrarMensaje("AVISO", "CÁMARA DETENIDA", "", "");
+}
+
+async function cambiarCamara() {
+    if (!camaraActiva || camarasDisponibles.length < 2) {
+        mostrarMensaje("AVISO", "SOLO HAY UNA CÁMARA", "", "");
+        return;
+    }
+
+    // Cambiar índice
+    indiceCamaraActual = (indiceCamaraActual + 1) % camarasDisponibles.length;
+
+    // Apagar linterna al cambiar
+    linternaEncendida = false;
+    actualizarBotonLinterna();
+
+    try {
+        await lector.stop();
+        const camId = camarasDisponibles[indiceCamaraActual].id;
+
+        const config = {
+            fps: 15,
+            qrbox: function(w, h) {
+                const minEdge = Math.min(w, h);
+                const size = Math.floor(minEdge * 0.72);
+                return { width: size, height: size };
+            },
+            aspectRatio: 1.0
+        };
+
+        await lector.start(camId, config, onScanSuccess, onScanFailure);
+        setTimeout(capturarVideoTrack, 500);
+
+        const nombre = camarasDisponibles[indiceCamaraActual].label || `Cámara ${indiceCamaraActual + 1}`;
+        mostrarMensaje("AVISO", "CÁMARA CAMBIADA", nombre.substring(0, 30), "");
+
+    } catch (e) {
+        console.error(e);
+        mostrarMensaje("ERROR", "NO SE PUDO CAMBIAR DE CÁMARA", "", "");
+        // Intentar volver a la anterior
+        await iniciarCamara();
+    }
+}
+
+async function toggleLinterna() {
+    if (!camaraActiva || !videoTrack) {
+        capturarVideoTrack();
+        if (!videoTrack) {
+            mostrarMensaje("AVISO", "LINTERNA NO DISPONIBLE", "", "");
+            return;
+        }
+    }
+
+    try {
+        const capabilities = videoTrack.getCapabilities?.() || {};
+        if (!capabilities.torch) {
+            mostrarMensaje("AVISO", "ESTE DISPOSITIVO NO TIENE LINTERNA", "", "");
+            return;
+        }
+
+        linternaEncendida = !linternaEncendida;
+        await videoTrack.applyConstraints({
+            advanced: [{ torch: linternaEncendida }]
+        });
+
+        actualizarBotonLinterna();
+        mostrarMensaje("AVISO", linternaEncendida ? "🔦 LINTERNA ENCENDIDA" : "LINTERNA APAGADA", "", "");
+
+    } catch (e) {
+        console.error(e);
+        linternaEncendida = false;
+        actualizarBotonLinterna();
+        mostrarMensaje("AVISO", "NO SE PUDO CONTROLAR LA LINTERNA", "", "");
+    }
+}
+
+function actualizarBotonLinterna() {
+    const btn = document.getElementById("botonLinterna");
+    if (linternaEncendida) {
+        btn.classList.add("activo");
+        btn.innerHTML = "💡";
+    } else {
+        btn.classList.remove("activo");
+        btn.innerHTML = "🔦";
+    }
+}
+
+function mostrarBotonesSecundarios(mostrar) {
+    const ids = ["botonDetener", "botonCambiar", "botonLinterna"];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (mostrar) el.classList.add("visible");
+        else el.classList.remove("visible");
+    });
 }
 
 // ============================================================
@@ -547,7 +770,7 @@ function procesarQR(codigo) {
     procesando = true;
 
     if (lector && camaraActiva) {
-        lector.pause(true);
+        try { lector.pause(true); } catch (e) {}
     }
 
     mostrarMensaje("AVISO", "🔎 VERIFICANDO...", "", "");
@@ -562,7 +785,6 @@ function enviarManual() {
         mostrarMensaje("ERROR", "INGRESE UN NÚMERO DE C.I.", "", "");
         return;
     }
-
     if (procesando) return;
 
     procesando = true;
@@ -576,7 +798,7 @@ document.getElementById("inputCI").addEventListener("keydown", (e) => {
 });
 
 // ============================================================
-// ENVIAR A APPS SCRIPT (JSONP)
+// ENVIAR A APPS SCRIPT
 // ============================================================
 function enviarCI(ci) {
     const callbackName = "respuestaQR_" + Date.now();
@@ -589,7 +811,7 @@ function enviarCI(ci) {
             setTimeout(() => {
                 procesando = false;
                 if (lector && camaraActiva) {
-                    lector.resume();
+                    try { lector.resume(); } catch (e) {}
                 }
             }, 2800);
         }
@@ -606,7 +828,9 @@ function enviarCI(ci) {
         delete window[callbackName];
         setTimeout(() => {
             procesando = false;
-            if (lector && camaraActiva) lector.resume();
+            if (lector && camaraActiva) {
+                try { lector.resume(); } catch (e) {}
+            }
         }, 2800);
     };
 
@@ -659,40 +883,25 @@ function mostrarMensaje(tipo, mensaje, nombre, hora) {
     let html = `<div class="estado">${mensaje}</div>`;
     if (nombre) html += `<div class="nombre">${nombre}</div>`;
     if (hora) html += `<div class="hora">🕐 ${hora}</div>`;
-
     el.innerHTML = html;
 }
 
 // ============================================================
-// HISTORIAL (con retención de 90 días)
+// HISTORIAL
 // ============================================================
 function agregarHistorial(nombre, hora, tipo) {
     const ahora = Date.now();
+    historial.unshift({ nombre, hora, tipo, ts: ahora });
 
-    historial.unshift({
-        nombre: nombre,
-        hora: hora,
-        tipo: tipo,
-        ts: ahora
-    });
-
-    // Limpiar registros antiguos (> 90 días)
     const limiteMs = DIAS_RETENCION * 24 * 60 * 60 * 1000;
     historial = historial.filter(item => (ahora - item.ts) < limiteMs);
-
-    // Limitar cantidad máxima
-    if (historial.length > MAX_REGISTROS) {
-        historial = historial.slice(0, MAX_REGISTROS);
-    }
+    if (historial.length > MAX_REGISTROS) historial = historial.slice(0, MAX_REGISTROS);
 
     try {
         localStorage.setItem('historialAsistencia', JSON.stringify(historial));
     } catch (e) {
-        // Si se llena el almacenamiento, eliminar los más antiguos
         historial = historial.slice(0, Math.floor(historial.length * 0.7));
-        try {
-            localStorage.setItem('historialAsistencia', JSON.stringify(historial));
-        } catch (e2) {}
+        try { localStorage.setItem('historialAsistencia', JSON.stringify(historial)); } catch (e2) {}
     }
 
     actualizarHistorialUI();
@@ -708,14 +917,12 @@ function actualizarHistorialUI() {
         return;
     }
 
-    // Mostrar los últimos 25 en pantalla (el resto queda guardado)
     const mostrar = historial.slice(0, 25);
-
     lista.innerHTML = mostrar.map(item => {
         const fecha = new Date(item.ts);
         const esHoy = fecha.toDateString() === new Date().toDateString();
-        const textoHora = esHoy 
-            ? item.hora 
+        const textoHora = esHoy
+            ? item.hora
             : fecha.toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit' }) + ' ' + (item.hora || '');
 
         return `
